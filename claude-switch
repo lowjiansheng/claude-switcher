@@ -1,0 +1,236 @@
+#!/bin/bash
+
+# Claude Model Switcher CLI Tool
+# Allows quick switching between different LLM providers
+
+set -e
+
+CONFIG_DIR="$(dirname "$0")/configs"
+SETTINGS_FILE="$HOME/.claude/settings.json"
+CURRENT_LINK="$CONFIG_DIR/current"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Usage function
+usage() {
+    echo -e "${BLUE}Claude Model Switcher${NC}"
+    echo ""
+    echo "Usage: claude-switch <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  <profile>           Switch to a provider profile (e.g., claude-switch minimax)"
+    echo "  list, ls            List all available profiles"
+    echo "  status, current     Show current active profile"
+    echo "  add <name>          Add a new profile (interactive)"
+    echo "  remove <name>       Remove a profile"
+    echo "  help                Show this help message"
+    echo ""
+    echo "Available profiles:"
+    list_profiles
+    echo ""
+    echo "Examples:"
+    echo "  claude-switch minimax    # Switch to MiniMax"
+    echo "  claude-switch kimi       # Switch to Kimi"
+    echo "  claude-switch claude     # Switch to Anthropic Claude"
+    echo "  claude-switch list       # Show all profiles"
+    exit 1
+}
+
+# List all available profiles
+list_profiles() {
+    if [ ! -d "$CONFIG_DIR" ]; then
+        echo -e "${YELLOW}No profiles configured. Run 'claude-switch add' to create one.${NC}"
+        return
+    fi
+
+    local current=""
+    if [ -L "$CURRENT_LINK" ]; then
+        current=$(readlink "$CURRENT_LINK")
+        current=$(basename "$current")
+    fi
+
+    for config in "$CONFIG_DIR"/*.json; do
+        if [ -f "$config" ]; then
+            local name=$(basename "$config" .json)
+            if [ "$name" = "current" ]; then
+                continue
+            fi
+            if [ "$name" = "$current" ]; then
+                echo -e "  ${GREEN}* $name${NC} (active)"
+            else
+                echo "    $name"
+            fi
+        fi
+    done
+}
+
+# Show current profile
+show_status() {
+    if [ -L "$CURRENT_LINK" ]; then
+        local current=$(readlink "$CURRENT_LINK")
+        local name=$(basename "$current")
+        echo -e "Current profile: ${GREEN}$name${NC}"
+    else
+        echo -e "Current profile: ${RED}none${NC}"
+    fi
+}
+
+# Switch to a profile
+switch_profile() {
+    local name="$1"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        usage
+    fi
+
+    local config_file="$CONFIG_DIR/$name.json"
+
+    if [ ! -f "$config_file" ]; then
+        echo -e "${RED}Error: Profile '$name' not found${NC}"
+        echo "Run 'claude-switch list' to see available profiles"
+        exit 1
+    fi
+
+    # Backup current settings
+    if [ -f "$SETTINGS_FILE" ]; then
+        cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup"
+    fi
+
+    # Copy new config
+    cp "$config_file" "$SETTINGS_FILE"
+
+    # Update current symlink
+    ln -sf "$name.json" "$CURRENT_LINK"
+
+    echo -e "${GREEN}Switched to profile: $name${NC}"
+
+    # Show the model being used
+    local model=$(grep -o '"ANTHROPIC_MODEL"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*"\([^"]*\)".*/\1/')
+    if [ -n "$model" ]; then
+        echo -e "Model: ${BLUE}$model${NC}"
+    fi
+
+    local base_url=$(grep -o '"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"[^"]*"' "$SETTINGS_FILE" | sed 's/.*"\([^"]*\)".*/\1/')
+    if [ -n "$base_url" ]; then
+        echo -e "API: ${BLUE}$base_url${NC}"
+    fi
+
+    echo ""
+    echo -e "${YELLOW}Restart Claude Code to use the new model${NC}"
+}
+
+# Add a new profile
+add_profile() {
+    local name="$1"
+
+    if [ -z "$name" ]; then
+        read -p "Enter profile name: " name
+    fi
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        exit 1
+    fi
+
+    local config_file="$CONFIG_DIR/$name.json"
+
+    if [ -f "$config_file" ]; then
+        echo -e "${RED}Error: Profile '$name' already exists${NC}"
+        exit 1
+    fi
+
+    echo -e "${BLUE}Creating profile: $name${NC}"
+    echo ""
+
+    read -p "API Base URL (e.g., https://api.minimax.io/anthropic): " base_url
+    read -p "API Key: " api_key
+    read -p "Model Name (e.g., MiniMax-M2.5): " model
+    read -p "Timeout in ms (default: 300000): " timeout
+
+    if [ -z "$timeout" ]; then
+        timeout="300000"
+    fi
+
+    cat > "$config_file" << EOF
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "$base_url",
+    "ANTHROPIC_AUTH_TOKEN": "$api_key",
+    "API_TIMEOUT_MS": "$timeout",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "ANTHROPIC_MODEL": "$model",
+    "ANTHROPIC_SMALL_FAST_MODEL": "$model",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "$model",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "$model",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$model"
+  }
+}
+EOF
+
+    echo ""
+    echo -e "${GREEN}Profile '$name' created successfully!${NC}"
+    echo "Run 'claude-switch $name' to activate it"
+}
+
+# Remove a profile
+remove_profile() {
+    local name="$1"
+
+    if [ -z "$name" ]; then
+        echo -e "${RED}Error: Profile name required${NC}"
+        usage
+    fi
+
+    local config_file="$CONFIG_DIR/$name.json"
+
+    if [ ! -f "$config_file" ]; then
+        echo -e "${RED}Error: Profile '$name' not found${NC}"
+        exit 1
+    fi
+
+    rm "$config_file"
+
+    # If this was the current profile, remove the symlink
+    if [ -L "$CURRENT_LINK" ]; then
+        local current=$(readlink "$CURRENT_LINK")
+        if [ "$(basename "$current")" = "$name.json" ]; then
+            rm "$CURRENT_LINK"
+        fi
+    fi
+
+    echo -e "${GREEN}Profile '$name' removed${NC}"
+}
+
+# Main command handling
+case "$1" in
+    list|ls)
+        show_status
+        echo ""
+        list_profiles
+        ;;
+    status|current)
+        show_status
+        ;;
+    add)
+        add_profile "$2"
+        ;;
+    remove|rm)
+        remove_profile "$2"
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        if [ -z "$1" ]; then
+            usage
+        else
+            switch_profile "$1"
+        fi
+        ;;
+esac
