@@ -1,11 +1,2 @@
 {
-  "env": {
-    "forceLoginMethod": "claudeai",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "ANTHROPIC_MODEL": "claude-opus-4-6",
-    "ANTHROPIC_SMALL_FAST_MODEL": "claude-haiku-4-2025-01-15",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-4-5-2025-02-19",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-4-6",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "claude-haiku-4-2025-01-15"
-  }
 }
